@@ -31,3 +31,11 @@ No quality-gate, real-device or external API claims are inferred from static lin
 - Latest `/api/latest` verifies recent publication timestamps in code and reports `stale` when no qualifying content has come from a successful publisher feed in the last six hours. The app never silently fills this tab with General stories.
 - External publisher returns, article-by-article accuracy, mobile Safari/WebKit/real-iPhone interaction, all 175 link endpoints, and persistent storage under Render sleeping/restarts **not verified**.
 - Build and test suite re-run after compiler/package and cache changes: Node **21 passed**, Chromium **5 scenarios passed**; no retries configured in the browser suite.
+
+## On-open refresh change verification (2026-11-19)
+
+- Updated browser selection logic to persist General's chosen 25 across reloads and tab switches, and to rotate based on elapsed time: **0 under 1 hour, 5 at 1–6 hours, 12 at 6–24 hours, up to 25 after 24 hours**. Added foreground-resume refresh through visibility, `pageshow` and focus events, with duplicate-event throttling.
+- After updating the mocked API test harness for the new General discovery endpoint, `python tests/browser.py` passed **8/8 Chromium scenarios**, retries disabled. The new scenarios exercise four timed page reopenings with persisted storage, a foreground resume, and unchanged-versus-new Latest publisher feed data.
+- `npm test` passed **21/21 Node unit tests** before final documentation changes; `npm run build` succeeded.
+- Local HTTP smoke using `PORT=8767 SCHEDULER=off` returned 200 for `/api/health`, `/api/latest`, `/api/general/discoveries`, `/api/general?visit=99` and `/api/schedule`; General contained 25 stories and the optional discovery response was a valid empty list (scheduler disabled). No outside publisher responses were fabricated.
+- Physical iPhone, WebKit/Safari, remote-source freshness, and a full offline service-worker lifecycle are **not verified** by these tests.
