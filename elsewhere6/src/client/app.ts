@@ -1,7 +1,7 @@
 /* Elsewhere's dependency-free browser client. Links remain valid without this script. */
 try {
 (() => {
-  type AnyStory=any;type Store={read:Record<string,number>;viewed:Record<string,number>;saved:Record<string,AnyStory>;hidden:Record<string,number>;known:Record<string,number>;interesting:Record<string,number>;visits:number;lastGeneral:string[];seen:Record<string,number>;latestCache:AnyStory[];latestFetchedAt:string;theme:string};
+  type AnyStory=any;type Store={read:Record<string,number>;viewed:Record<string,number>;saved:Record<string,AnyStory>;hidden:Record<string,number>;known:Record<string,number>;interesting:Record<string,number>;visits:number;lastGeneral:string[];seen:Record<string,number>;latestCache:AnyStory[];latestFetchedAt:string;theme:string;generalSelection:string[];generalMixAt:number;lastOpenedAt:number;generalRemote:AnyStory[]};
   const $=(selector:string,base:ParentNode=document)=>base.querySelector(selector) as HTMLElement|null;
   const queryAll=(selector:string,base:ParentNode=document)=>Array.from(base.querySelectorAll(selector)) as HTMLElement[];
   const id=(s:string)=>document.getElementById(s);
@@ -10,12 +10,12 @@ try {
   const demo:AnyStory[]=JSON.parse(id('embedded-demo')?.textContent||'[]');
   const STORAGE='elsewhere-state-v6';let memory:Partial<Store>={};
   try{memory=JSON.parse(localStorage.getItem(STORAGE)||'{}')||{}}catch{}
-  const state:Store={read:memory.read||{},viewed:memory.viewed||{},saved:memory.saved||{},hidden:memory.hidden||{},known:memory.known||{},interesting:memory.interesting||{},visits:Number(memory.visits||0)+1,lastGeneral:memory.lastGeneral||[],seen:memory.seen||{},latestCache:memory.latestCache||[],latestFetchedAt:memory.latestFetchedAt||'',theme:memory.theme||'dark'};
-  let latest:AnyStory[]=[];let latestSelection:string[]=[];let generalMix:AnyStory[]=[];let status:'loading'|'live'|'cached'|'demo'|'offline'='loading';let errorText='';let allowOlder=false;
+  const state:Store={read:memory.read||{},viewed:memory.viewed||{},saved:memory.saved||{},hidden:memory.hidden||{},known:memory.known||{},interesting:memory.interesting||{},visits:Number(memory.visits||0),lastGeneral:memory.lastGeneral||[],seen:memory.seen||{},latestCache:memory.latestCache||[],latestFetchedAt:memory.latestFetchedAt||'',theme:memory.theme||'dark',generalSelection:memory.generalSelection||[],generalMixAt:Number(memory.generalMixAt||0),lastOpenedAt:Number(memory.lastOpenedAt||0),generalRemote:memory.generalRemote||[]};
+  let latest:AnyStory[]=[];let latestSelection:string[]=[];let generalMix:AnyStory[]=[];let mixChanged=0;let latestChanged=0;let status:'loading'|'live'|'cached'|'demo'|'offline'='loading';let errorText='';let allowOlder=false;
   let dialogReturn='#general';let sectionScroll:Record<string,number>={latest:0,general:0};let searchQuery='';let savedSection='saved';
   let front=window.location.hash||'#general';if(!/^#(?:latest|general|search|saved|you|story-[a-z0-9-]+)$/.test(front))front='#general';
   if(front.startsWith('#story-'))front='#general';
-  const stories=new Map<string,AnyStory>([...general,...demo,...Object.values(state.saved)].map(s=>[s.id,s]));
+  const stories=new Map<string,AnyStory>([...general,...state.generalRemote,...demo,...Object.values(state.saved)].map(s=>[s.id,s]));
   const currentDate=()=>Date.now();const DAY=86400000;
   const esc=(s:any)=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
   const isSafe=(url:string)=>{try{return new URL(url).protocol==='https:'}catch{return false}};
@@ -28,6 +28,7 @@ try {
   const size=(s:string)=>Math.ceil(String(s||'').trim().split(/\s+/).length/210)||1;
   const slugNum=(key:string)=>{let v=2166136261;for(let i=0;i<key.length;i++)v=Math.imul(v^key.charCodeAt(i),16777619)>>>0;return v/4294967296};
   function rankGeneral(input:AnyStory[],visit:number,last:string[]):AnyStory[]{
+    // Editorial ranking, not interest or engagement ranking. Read items go last.
     const recent=new Set(last);const tiers=[input.filter(s=>!state.read[s.id]&&!recent.has(s.id)),input.filter(s=>!state.read[s.id]&&recent.has(s.id)),input.filter(s=>!!state.read[s.id])];
     const ordered=tiers.flatMap(t=>t.sort((a,b)=>b.worth+.6*slugNum(b.id+':'+visit)-(a.worth+.6*slugNum(a.id+':'+visit))));
     return ordered.slice(0,25).sort((a,b)=>(state.read[a.id]&&state.read[b.id])?state.read[a.id]-state.read[b.id]:Number(Boolean(state.read[a.id]))-Number(Boolean(state.read[b.id])));
@@ -43,27 +44,68 @@ try {
         return score(b)-score(a);
       }).slice(0,25);
   }
-  function replenishGeneral(newVisit=false){
-    const candidates=general.filter(s=>!state.hidden[s.id]&&!state.known[s.id]);
-    if(newVisit||!generalMix.length){
-      generalMix=rankGeneral(candidates,state.visits,state.lastGeneral);
-      state.lastGeneral=generalMix.map(s=>s.id);persist();
-      return;
-    }
-    // Preserve the mix on tab switching, feedback, and storage sync.
-    const byId=new Map(candidates.map(s=>[s.id,s]));
-    const existing=generalMix.map(s=>byId.get(s.id)).filter(Boolean);
-    const existingIds=new Set(existing.map(s=>s.id));
-    const eligible=rankGeneral(candidates.filter(s=>!existingIds.has(s.id)),state.visits,state.lastGeneral);
-    generalMix=[...existing,...eligible].slice(0,25);
-    generalMix.sort((a,b)=>{
-      const ra=state.read[a.id]||0,rb=state.read[b.id]||0;
-      if(Boolean(ra)!==Boolean(rb))return ra?1:-1;
-      if(ra&&rb)return ra-rb;
-      return 0;
-    });
+  const HOUR=3600000;
+  // We re-evaluate on every app open, but don't churn an unchanged feed arbitrarily.
+  // General needs time to collect variety; Latest is refreshed from real sources separately.
+  function replaceTarget(ageMs:number):number {
+    if(ageMs<HOUR)return 0;
+    if(ageMs<6*HOUR)return 5;
+    if(ageMs<24*HOUR)return 12;
+    return 25;
   }
-  replenishGeneral();document.body.dataset.theme=state.theme;
+  function availableGeneral():AnyStory[]{
+    return [...new Map([...general,...state.generalRemote].map(s=>[s.id,s])).values()]
+      .filter(s=>s.kind==='general'&&!state.hidden[s.id]&&!state.known[s.id]);
+  }
+  const readLast=(items:AnyStory[])=>[...items].sort((a,b)=>{
+    const aRead=state.read[a.id]||0,bRead=state.read[b.id]||0;
+    if(Boolean(aRead)!==Boolean(bRead))return aRead?1:-1;
+    return aRead&&bRead?aRead-bRead:0;
+  });
+  function replenishGeneral():void{
+    // While switching sections or marking a story known/hidden, preserve every
+    // eligible card. Only fill vacancies; do not start another visit.
+    const candidates=availableGeneral();const byId=new Map(candidates.map(s=>[s.id,s]));
+    const kept=state.generalSelection.map(key=>byId.get(key)).filter(Boolean);
+    const keepIds=new Set(kept.map(s=>s.id));
+    const additional=rankGeneral(candidates.filter(s=>!keepIds.has(s.id)),state.visits,state.generalSelection);
+    generalMix=readLast([...kept,...additional].slice(0,25));
+    state.generalSelection=generalMix.map(s=>s.id);
+    persist();
+  }
+  function refreshGeneralOnOpen(now=Date.now(),force=false):void{
+    const candidates=availableGeneral();const byId=new Map(candidates.map(s=>[s.id,s]));
+    const before=state.generalSelection.map(key=>byId.get(key)).filter(Boolean);
+    const since=state.generalMixAt?Math.max(0,now-state.generalMixAt):Infinity;
+    const replacement=!before.length?25:force?25:replaceTarget(since);
+    if(replacement===0){
+      replenishGeneral();mixChanged=0;return;
+    }
+    const keepCount=Math.max(0,25-replacement);
+    // Keep higher-worth unread cards first, then read ones; no interest scores.
+    const kept=[...before].sort((a,b)=>{
+      const aRead=Number(Boolean(state.read[a.id])),bRead=Number(Boolean(state.read[b.id]));
+      return aRead-bRead || b.worth-a.worth || slugNum(b.id+':'+state.visits)-slugNum(a.id+':'+state.visits);
+    }).slice(0,keepCount);
+    const keepIds=new Set(kept.map(s=>s.id));
+    const freshCandidates=candidates.filter(s=>!keepIds.has(s.id)&&!before.some(x=>x.id===s.id));
+    const newItems=rankGeneral(freshCandidates,state.visits,before.map(s=>s.id));
+    let combined=[...kept,...newItems.slice(0,replacement)];
+    if(combined.length<25){const used=new Set(combined.map(s=>s.id));
+      const extra=rankGeneral(candidates.filter(s=>!used.has(s.id)),state.visits,before.map(s=>s.id));
+      combined=[...combined,...extra.slice(0,25-combined.length)];
+    }
+    // Editor-worth order for a changed list; preserving the exact list and order
+    // is more important when no changes are warranted.
+    const editorial=(s:AnyStory)=>s.worth+.6*slugNum(s.id+':'+state.visits);
+    generalMix=readLast(combined.sort((a,b)=>editorial(b)-editorial(a)).slice(0,25));
+    state.lastGeneral=before.map(s=>s.id);
+    state.generalSelection=generalMix.map(s=>s.id);
+    state.generalMixAt=now;
+    mixChanged=generalMix.filter(s=>!before.some(x=>x.id===s.id)).length;
+    persist();
+  }
+  document.body.dataset.theme=state.theme;
   const loadedHtml=id('static-edition');const runtime=id('dynamic-app');
   if(loadedHtml)loadedHtml.hidden=true;if(runtime)runtime.hidden=false;
   document.body.classList.add('enhanced');
@@ -83,12 +125,12 @@ try {
       <div class="cue">${read?'Read again':'Read more'} <span>↗</span></div>
       </div></article>`;
   }
-  function hero(kind:string){const latestTab=kind==='latest';return `<section class="section-intro"><div class="kicker">${latestTab?'01 / THE PRESENT':'02 / THE UNEXPECTED'}</div><h1>${latestTab?'The world, <em>right now.</em>':'Meet what you <em>didn’t know.</em>'}</h1><p>${latestTab?'25 significant developments, from anywhere and about anything.':'25 discoveries worth knowing. New mix each visit.'}</p></section>`;}
+  function hero(kind:string){const latestTab=kind==='latest';return `<section class="section-intro"><div class="kicker">${latestTab?'01 / THE PRESENT':'02 / THE UNEXPECTED'}</div><h1>${latestTab?'The world, <em>right now.</em>':'Meet what you <em>didn’t know.</em>'}</h1><p>${latestTab?'25 significant developments, from anywhere and about anything.':'25 discoveries worth knowing. Checked on each open; refreshed when it makes sense.'}</p></section>`;}
   const skeleton=`<div class="fetching" role="status"><div class="spinner"></div><strong>Fetching the latest verified stories…</strong><span>Checking dates, sources, and context</span></div><div class="skeleton"></div><div class="skeleton"></div>`;
   function recencyStatus(){
     const ts=state.latestFetchedAt?date(state.latestFetchedAt):'never';
     const msg=status==='live'?'Up to date':status==='cached'?'Cached copy':status==='demo'?'Demo copy — not live, will age':status==='loading'?'Checking sources':'Sources unavailable';
-    return `<div class="feed-status ${status}"><span class="status-dot"></span><strong>${msg}</strong>${status==='live'||status==='cached'?`<small>Last checked ${esc(ts)}</small>`:''}${errorText?`<small>${esc(errorText)}</small>`:''}</div>`;
+    return `<div class="feed-status ${status}"><span class="status-dot"></span><strong>${msg}</strong>${status==='live'||status==='cached'?`<small>Last checked ${esc(ts)}</small>`:''}${status==='live'&&latestChanged>0?`<small>${latestChanged} new since your previous feed</small>`:''}${errorText?`<small>${esc(errorText)}</small>`:''}</div>`;
   }
   function latestView(){
     const fromCache=status==='cached'||status==='offline',pool=status==='demo'?demo:fromCache?state.latestCache:latest;
@@ -103,7 +145,7 @@ try {
     return hero('latest')+recencyStatus()+cards;
   }
   function generalView(){const items=generalMix.filter(s=>!state.hidden[s.id]&&!state.known[s.id]);return hero('general')+
-    `<div class="general-topline"><span>${items.length} discoveries selected for this visit</span><button class="subtle-button" data-mix="true">↻ New mix</button></div><div class="cards">${items.map(storyCard).join('')}</div>`;}
+    `<div class="general-topline"><span>${items.length} discoveries · ${mixChanged?mixChanged+' new since last refresh':'list checked, no reshuffle needed'}</span><button class="subtle-button" data-mix="true">↻ New mix</button></div><div class="cards">${items.map(storyCard).join('')}</div>`;}
   function detailView(s:AnyStory){const read=!!state.read[s.id],saved=!!state.saved[s.id];const facts=(s.relatedFacts||[]).slice(0,3),related=(s.relatedIds||[]).map((x:string)=>stories.get(x)).filter((x:AnyStory)=>x&&!state.hidden[x.id]&&!state.known[x.id]).slice(0,4);
     return `<article class="story-page"><div class="story-toolrow"><button class="iconbutton back-action" data-back="true" aria-label="Back">←</button><div class="rightbuttons"><button class="iconbutton" data-share="${esc(s.id)}" aria-label="Share story">↗</button><button class="iconbutton ${saved?'active':''}" data-save="${esc(s.id)}" aria-pressed="${saved}" aria-label="${saved?'Unsave':'Save'} story">${saved?'♥':'♡'}</button></div></div>
       <div class="story-top"><span class="category-pill">${esc(s.category)}</span><span class="story-worth">Worth ${esc(s.worth)} / 5</span></div>
@@ -162,7 +204,7 @@ try {
     const save=el.closest('[data-save]') as HTMLElement|null;if(save){e.preventDefault();e.stopPropagation();const key=save.dataset.save!,s=findStory(key);if(state.saved[key])delete state.saved[key];else if(s)state.saved[key]=JSON.parse(JSON.stringify(s));persist();render();return}
     const back=el.closest('[data-back]');if(back){e.preventDefault();goBack();return}
     const next=el.closest('[data-next]');if(next){e.preventDefault();nextStory();return}
-    const mix=el.closest('[data-mix]');if(mix){e.preventDefault();state.visits+=1;replenishGeneral(true);sectionScroll.general=0;render();window.scrollTo(0,0);return}
+    const mix=el.closest('[data-mix]');if(mix){e.preventDefault();state.visits+=1;refreshGeneralOnOpen(Date.now(),true);sectionScroll.general=0;render();window.scrollTo(0,0);return}
     const refresh=el.closest('[data-refresh]');if(refresh){e.preventDefault();void fetchLatest(true);return}
     const older=el.closest('[data-older]');if(older){e.preventDefault();allowOlder=true;render();return}
     const tryDemo=el.closest('[data-demo]');if(tryDemo){e.preventDefault();status='demo';render();return}
@@ -176,21 +218,52 @@ try {
   document.addEventListener('input',e=>{const t=e.target as HTMLInputElement;if(t.id==='search-input'){const start=t.selectionStart;searchQuery=t.value;render();const field=id('search-input') as HTMLInputElement;field?.focus();field?.setSelectionRange(start,start)}if(t.id==='theme-toggle'){state.theme=t.checked?'light':'dark';document.body.dataset.theme=state.theme;persist()}});
   window.addEventListener('storage',e=>{if(e.key===STORAGE){try{const newState=JSON.parse(e.newValue||'{}');Object.assign(state,newState);document.body.dataset.theme=state.theme;replenishGeneral();render()}catch{}}});
   function validPayload(payload:any){return payload&&Array.isArray(payload.stories)}
+  let fetchingLatest=false;let retryLatest:ReturnType<typeof setTimeout>|null=null;
   async function fetchLatest(force=false){
+    if(fetchingLatest)return;fetchingLatest=true;
     if(!force&&status==='loading'){render()}const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),13000);
     try{
       const resp=await fetch('/api/latest',{cache:'no-store',signal:ctrl.signal});if(!resp.ok)throw Error('HTTP '+resp.status);
       const payload=await resp.json();if(!validPayload(payload))throw Error('Invalid API response');
-      const items=payload.stories.filter(fresh);if(items.length){latest=items;latestSelection=rankLatest(items).map((s:any)=>s.id);for(const s of items)stories.set(s.id,s);state.latestCache=items;state.latestFetchedAt=payload.generatedAt||new Date().toISOString();persist();status=payload.stale?'cached':'live';errorText=payload.stale?'The source snapshot is older than six hours.':''}
+      const items=payload.stories.filter(fresh);if(items.length){
+        const previous=new Set(rankLatest(state.latestCache).map((s:any)=>s.id));
+        latestChanged=previous.size?rankLatest(items).filter((s:any)=>!previous.has(s.id)).length:0;
+        latest=items;latestSelection=rankLatest(items).map((s:any)=>s.id);for(const s of items)stories.set(s.id,s);state.latestCache=items;state.latestFetchedAt=payload.generatedAt||new Date().toISOString();persist();status=payload.stale?'cached':'live';errorText=payload.stale?'The source snapshot is older than six hours.':''}
       else if(state.latestCache.some(fresh)){if(!latestSelection.length)latestSelection=rankLatest(state.latestCache).map((s:any)=>s.id);status='cached';errorText='No new publisher articles; showing your last successful fetch.'}
-      else{status='offline';errorText='No qualifying recent source reports.'}
+      else{status='offline';errorText='No qualifying recent source reports.';
+        // A sleeping free-tier server can reply before its scheduler finishes the first ingestion.
+        if(!retryLatest&&location.protocol!=='file:')retryLatest=setTimeout(()=>{retryLatest=null;void fetchLatest()},12000);
+      }
     }catch(e){status=state.latestCache.some(fresh)?'cached':'offline';errorText='Content API unavailable: '+String((e as Error).message||e).slice(0,100);for(const s of state.latestCache)stories.set(s.id,s)}
-    finally{clearTimeout(timer);render()}
+    finally{clearTimeout(timer);fetchingLatest=false;render()}
   }
-  window.addEventListener('online',()=>void fetchLatest());document.addEventListener('visibilitychange',()=>{if(!document.hidden)void fetchLatest()});
+  let fetchingGeneral=false;
+  async function fetchGeneralDiscoveries(){
+    if(location.protocol==='file:'||fetchingGeneral)return;fetchingGeneral=true;
+    try{const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),11000);
+      let res:Response;try{res=await fetch('/api/general/discoveries',{cache:'no-store',signal:controller.signal})}finally{clearTimeout(timer)}
+      if(!res.ok)return;const payload=await res.json();if(!Array.isArray(payload.stories))return;
+      const verified=payload.stories.filter((s:AnyStory)=>s?.kind==='general'&&safeId(s.id)&&s.title&&s.summary&&isSafe(s.source?.url));
+      // Retain previously sourced knowledge for offline reading; cap the remote pool.
+      const merged=new Map([...state.generalRemote,...verified].map((s:AnyStory)=>[s.id,s]));
+      state.generalRemote=[...merged.values()].slice(-90);for(const s of state.generalRemote)stories.set(s.id,s);
+      persist();replenishGeneral();if((location.hash||'#general')==='#general')render();
+    }catch{ /* General's bundled offline collection remains available. */ }finally{fetchingGeneral=false}
+  }
+  let lastActivation=0;
+  function onAppOpen(){
+    const now=Date.now();if(now-lastActivation<3000)return;lastActivation=now;
+    state.visits+=1;state.lastOpenedAt=now;refreshGeneralOnOpen(now);persist();render();
+    if(location.protocol==='file:')return;
+    void fetchLatest();void fetchGeneralDiscoveries();
+  }
+  window.addEventListener('online',()=>{void fetchLatest();void fetchGeneralDiscoveries()});
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)onAppOpen()});
+  window.addEventListener('pageshow',e=>{if(e.persisted)onAppOpen()});
+  window.addEventListener('focus',()=>{if(!document.hidden)onAppOpen()});
   setInterval(()=>{if(!document.hidden)void fetchLatest()},10*60*1000);
-  if(location.protocol==='file:'){status='demo';for(const s of demo)stories.set(s.id,s);errorText='Standalone demo: content is dated and cannot refresh.';}else void fetchLatest();
-  render();
+  if(location.protocol==='file:'){status='demo';for(const s of demo)stories.set(s.id,s);errorText='Standalone demo: content is dated and cannot refresh.';}
+  onAppOpen();
   try{if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('/sw.js').catch(()=>{})}catch{}
 })();
 } catch (err) {
