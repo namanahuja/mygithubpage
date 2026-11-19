@@ -43,10 +43,25 @@ try {
         return score(b)-score(a);
       }).slice(0,25);
   }
-  function replenishGeneral(force=false){
+  function replenishGeneral(newVisit=false){
     const candidates=general.filter(s=>!state.hidden[s.id]&&!state.known[s.id]);
-    if(force||!generalMix.length){generalMix=rankGeneral(candidates,state.visits,state.lastGeneral);state.lastGeneral=generalMix.map(s=>s.id);persist();}
-    else generalMix=rankGeneral(generalMix,state.visits,[]); // same set, read items move below unread.
+    if(newVisit||!generalMix.length){
+      generalMix=rankGeneral(candidates,state.visits,state.lastGeneral);
+      state.lastGeneral=generalMix.map(s=>s.id);persist();
+      return;
+    }
+    // Preserve the mix on tab switching, feedback, and storage sync.
+    const byId=new Map(candidates.map(s=>[s.id,s]));
+    const existing=generalMix.map(s=>byId.get(s.id)).filter(Boolean);
+    const existingIds=new Set(existing.map(s=>s.id));
+    const eligible=rankGeneral(candidates.filter(s=>!existingIds.has(s.id)),state.visits,state.lastGeneral);
+    generalMix=[...existing,...eligible].slice(0,25);
+    generalMix.sort((a,b)=>{
+      const ra=state.read[a.id]||0,rb=state.read[b.id]||0;
+      if(Boolean(ra)!==Boolean(rb))return ra?1:-1;
+      if(ra&&rb)return ra-rb;
+      return 0;
+    });
   }
   replenishGeneral();document.body.dataset.theme=state.theme;
   const loadedHtml=id('static-edition');const runtime=id('dynamic-app');
@@ -153,13 +168,13 @@ try {
     const tryDemo=el.closest('[data-demo]');if(tryDemo){e.preventDefault();status='demo';render();return}
     const share=el.closest('[data-share]') as HTMLElement|null;if(share){e.preventDefault();const s=findStory(share.dataset.share!);if(!s)return;const url=location.origin+location.pathname+'#story-'+s.id;if((navigator as any).share){(navigator as any).share({title:s.title,text:s.summary,url}).catch(()=>{})}else if(navigator.clipboard?.writeText){navigator.clipboard.writeText(url).then(()=>toast('Story link copied')).catch(()=>toast(url))}else toast(url);return}
     const feedback=el.closest('[data-feedback]') as HTMLElement|null;if(feedback){e.preventDefault();const key=feedback.dataset.fid!,type=feedback.dataset.feedback!;if(type==='interesting'){state.interesting[key]=Date.now();persist();toast('Marked interesting');render();return}
-      const was=type==='known'?state.known[key]:state.hidden[key];if(type==='known')state.known[key]=Date.now();else state.hidden[key]=Date.now();persist();replenishGeneral(true);hash(previousRoute);toast(type==='known'?'Moved to Known':'Story hidden',{label:'Undo',fn:()=>{if(type==='known'){if(was)state.known[key]=was;else delete state.known[key]}else{if(was)state.hidden[key]=was;else delete state.hidden[key]}persist();replenishGeneral(true);render();}});return}
+      const was=type==='known'?state.known[key]:state.hidden[key];if(type==='known')state.known[key]=Date.now();else state.hidden[key]=Date.now();persist();replenishGeneral();hash(previousRoute);toast(type==='known'?'Moved to Known':'Story hidden',{label:'Undo',fn:()=>{if(type==='known'){if(was)state.known[key]=was;else delete state.known[key]}else{if(was)state.hidden[key]=was;else delete state.hidden[key]}persist();replenishGeneral();render();}});return}
     const mini=el.closest('[data-library]') as HTMLElement|null;if(mini){e.preventDefault();savedSection=mini.dataset.library!;render();return}
-    const undo=el.closest('[data-restore]') as HTMLElement|null;if(undo){e.preventDefault();const key=undo.dataset.restore!;delete state.known[key];delete state.hidden[key];persist();replenishGeneral(true);render();return}
-    const clear=el.closest('[data-clear]');if(clear){e.preventDefault();if(!confirm('Clear bookmarks, reading history, and feedback from this device?'))return;for(const k of ['read','viewed','saved','hidden','known','interesting','seen'] as const)(state as any)[k]={};persist();replenishGeneral(true);render();return}
+    const undo=el.closest('[data-restore]') as HTMLElement|null;if(undo){e.preventDefault();const key=undo.dataset.restore!;delete state.known[key];delete state.hidden[key];persist();replenishGeneral();render();return}
+    const clear=el.closest('[data-clear]');if(clear){e.preventDefault();if(!confirm('Clear bookmarks, reading history, and feedback from this device?'))return;for(const k of ['read','viewed','saved','hidden','known','interesting','seen'] as const)(state as any)[k]={};persist();replenishGeneral();render();return}
   });
   document.addEventListener('input',e=>{const t=e.target as HTMLInputElement;if(t.id==='search-input'){const start=t.selectionStart;searchQuery=t.value;render();const field=id('search-input') as HTMLInputElement;field?.focus();field?.setSelectionRange(start,start)}if(t.id==='theme-toggle'){state.theme=t.checked?'light':'dark';document.body.dataset.theme=state.theme;persist()}});
-  window.addEventListener('storage',e=>{if(e.key===STORAGE){try{const newState=JSON.parse(e.newValue||'{}');Object.assign(state,newState);document.body.dataset.theme=state.theme;replenishGeneral(true);render()}catch{}}});
+  window.addEventListener('storage',e=>{if(e.key===STORAGE){try{const newState=JSON.parse(e.newValue||'{}');Object.assign(state,newState);document.body.dataset.theme=state.theme;replenishGeneral();render()}catch{}}});
   function validPayload(payload:any){return payload&&Array.isArray(payload.stories)}
   async function fetchLatest(force=false){
     if(!force&&status==='loading'){render()}const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),13000);

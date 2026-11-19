@@ -100,7 +100,7 @@ export class Pipeline {
   this.state=this.load();
  }
  load():Stored{try{return {...EMPTY,...JSON.parse(fs.readFileSync(this.file,'utf8'))}}catch{return {...EMPTY,stories:[],feedStatus:{},lastGood:{},generalDiscoveries:[]}}}
- persist():void{fs.mkdirSync(this.dataDir,{recursive:true});const tmp=this.file+'.'+process.pid+'.tmp';fs.writeFileSync(tmp,JSON.stringify(this.state));fs.renameSync(tmp,this.file)}
+ persist():void{fs.mkdirSync(this.dataDir,{recursive:true});const tmp=this.file+'.'+process.pid+'.'+require('node:crypto').randomUUID()+'.tmp';fs.writeFileSync(tmp,JSON.stringify(this.state));fs.renameSync(tmp,this.file)}
  async fetchSource(feed:FeedConfig,now=Date.now()):Promise<{feed:FeedConfig;items:Story[];error?:string}> {
   const previous=this.state.feedStatus[feed.id]||{} as any;
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),9000);
