@@ -16,7 +16,7 @@ A mobile-first, no-interest-onboarding discovery app. **Exactly two primary tabs
 
 ## Run locally
 
-Requirements: Node.js 20+ and npm. Internet is needed to install TypeScript and retrieve new publisher feeds. An already-built package starts without third-party runtime dependencies.
+Requirements: Node.js 20+ and npm. Internet is needed to install TypeScript and retrieve new publisher feeds. An already-built package starts without third-party runtime dependencies. The deploy build pins TypeScript 5.8.3 and Node.js 22 so newer compiler defaults do not break the build.
 
 ```bash
 npm install
@@ -67,3 +67,11 @@ The API reports **publisher excerpts, not independently fact-checked articles**.
 `npm test` executes dependency-free Node unit tests. `npm run test:browser` uses Python Playwright + Chromium to test embedded DOM/touch interactions. **Do not claim these tests represent iOS Safari or a deployed service.** See `TEST_RESULTS.md`.
 
 Caveats: exact RSS availability and copyright permissions for every publisher have not been tested. The 175 reference-backed evergreen topics have not undergone independent line-by-line fact verification or a full external hyperlink audit. Several long explanations contain editorial framing/interpretations rather than uniquely sourced deep reporting. This is a substantive content-quality task before representing the library as fully editor-verified. The demo has no independent web reporting, no cloud account sync, and no native app binaries. The link checker makes best-effort HEAD/GET requests, does not retire content if the network appears down, and does not guarantee editorial correctness. The optional model integration was not exercised with live credentials.
+
+## Current hosted deployment (November 19, 2026)
+
+- Render free web service: **https://elsewhere-discovery-v6.onrender.com** (confirmed `live` in the Render deployment record; build and server-start logs verified).
+- GitHub source: https://github.com/namanahuja/mygithubpage/tree/master/elsewhere6.
+- Hosted instance is free and can sleep after inactivity; scheduled source refreshes **do not run while asleep**, and the app may take time to wake. The instance currently has no persistent Render disk.
+- Publisher feed API response contents cannot be independently inspected from the restricted build container (outbound DNS restricted); publisher availability/content quality remain unverified, despite the live server boot.
+- Full-time operation requires the paid Starter plan or an external scheduler plus durable storage, and explicit user approval before charges.

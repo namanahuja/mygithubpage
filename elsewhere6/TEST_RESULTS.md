@@ -17,9 +17,17 @@ The browser sandbox blocks normal navigation to `http://localhost:3107/`, `file:
 - **External publisher feeds:** no live HTTP calls from this restricted test container; endpoint validity and terms pending.
 - **Live AI summarization:** no API key; optional path not tested with a model.
 - **Full factual review of 175 topics and article-specific citation links:** not completed; current content is reference-backed but not individually editor-verified.
-- **Live Render deployment:** pending separate deployment verification; the old Python Elsewhere instance is unrelated to this V6 Node build.
+- **Render deployment:** the first build failed because unpinned TypeScript compiled against an incompatible resolution mode. After pinning TypeScript 5.8.3 and Node 22, build passed and Render confirmed deployment `live` for V6, with boot log `175 general | 37 feeds`. The public API response contents and true individual publisher freshness could not be independently inspected from this restricted network.
 - **Docker build:** Docker engine unavailable in the current test container; Dockerfile/compose syntax not run.
 - **Production Scheduler uptime and disk persistence:** unverified; requires always-on hosting and mounted volume.
 - **Exact 50–100 word Latest summary for every source:** not guaranteed if publisher feed exposes less text. The app refuses to fabricate.
 
 No quality-gate, real-device or external API claims are inferred from static linting/unit tests.
+
+## Deployment and follow-up verification (2026-11-19)
+
+- GitHub commit `4e399abf6c56814a1264dad957cb1d2418283400` fixed compiler pinning, isolated cache temp filenames and General mix stability; a later patch tightened the definition of a fresh Latest feed.
+- Render service `srv-dbvn8lv40ujc73e8r7m0`, deploy `dep-dbvnbgff3r2c73cptop0`: **status live**. Service started successfully with the 175-story library and 37 configured enabled feeds.
+- Latest `/api/latest` verifies recent publication timestamps in code and reports `stale` when no qualifying content has come from a successful publisher feed in the last six hours. The app never silently fills this tab with General stories.
+- External publisher returns, article-by-article accuracy, mobile Safari/WebKit/real-iPhone interaction, all 175 link endpoints, and persistent storage under Render sleeping/restarts **not verified**.
+- Build and test suite re-run after compiler/package and cache changes: Node **21 passed**, Chromium **5 scenarios passed**; no retries configured in the browser suite.
