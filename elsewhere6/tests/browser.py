@@ -2,7 +2,7 @@
 The sandbox blocks ordinary navigation, so this checks real DOM/touch events, not hosted HTTP or Service Worker registration.
 """
 from pathlib import Path
-from datetime import datetime,timezone
+from datetime import datetime,timezone,timedelta
 from playwright.sync_api import sync_playwright
 import json,traceback
 HERE=Path(__file__).resolve().parent.parent
@@ -13,17 +13,24 @@ DATA=[dict(id='latest-test-'+str(i),kind='latest',category='Science',title=f'Dis
  background='Article summary from publisher feed.',whyItMatters='The development has implications worth knowing.',whyRead='Source-backed current story.',
  relatedFacts=[],relatedIds=[],alsoReportedBy=[],uncertainty='One publisher; not independently verified.',provenance='publisher excerpt',readingMinutes=1,worth=4) for i in range(26)]
 
-def page_html(mode='ok',stored=None):
+def page_html(mode='ok',stored=None,offset_hours=0):
  data=json.dumps(dict(generatedAt=NOW,stale=False,stories=DATA,sources=[],tiers=[]))
  setup=f'''<script>
  window.__testStore={json.dumps(stored or {})};
+ window.__apiPayload={data};
+ window.__fakeNow={int(datetime.fromisoformat(NOW).timestamp()*1000)} + {int(offset_hours*3600000)};
+ Date.now=()=>window.__fakeNow;
+ window.__latestFetchCount=0;
+ window.__generalFetchCount=0;
  Object.defineProperty(window,'localStorage',{{configurable:true,value:{{
   getItem(k){{return window.__testStore[k]??null;}},
   setItem(k,v){{window.__testStore[k]=String(v)}},
   removeItem(k){{delete window.__testStore[k]}}
  }}}});
- window.fetch=async function() {{
-  {"return new Promise(resolve => {window.__finishFetch=()=>resolve(new Response("+json.dumps(data)+",{status:200,headers:{'Content-Type':'application/json'}}));});" if mode=='slow' else "return new Response('Bad gateway',{status:502});" if mode=='failure' else "return new Response("+json.dumps(data)+",{status:200,headers:{'Content-Type':'application/json'}});"}
+ window.fetch=async function(url) {{
+  if(String(url).includes('/api/general/discoveries')){{window.__generalFetchCount++;return new Response(JSON.stringify({{stories:[],generatedAt:new Date().toISOString()}}),{{status:200}})}}
+  window.__latestFetchCount++;
+  {"return new Promise(resolve => {window.__finishFetch=()=>resolve(new Response(JSON.stringify(window.__apiPayload),{status:200,headers:{'Content-Type':'application/json'}}));});" if mode=='slow' else "return new Response('Bad gateway',{status:502});" if mode=='failure' else "return new Response(JSON.stringify(window.__apiPayload),{status:200,headers:{'Content-Type':'application/json'}});"}
  }};
  </script>'''
  return HTML.replace('<script>/* Elsewhere',setup+'<script>/* Elsewhere',1)
@@ -34,10 +41,10 @@ def chk(x,msg):
 all_errors=[];passed=[]
 with sync_playwright() as p:
  browser=p.chromium.launch(headless=True,executable_path='/usr/bin/chromium',args=['--no-sandbox'])
- def make(mobile=False,mode='ok',js=True,stored=None):
+ def make(mobile=False,mode='ok',js=True,stored=None,offset_hours=0):
   ctx=browser.new_context(viewport={'width':390 if mobile else 1280,'height':844 if mobile else 900},is_mobile=mobile,has_touch=mobile,java_script_enabled=js)
   page=ctx.new_page();page.set_default_timeout(4500);page.on('pageerror',lambda e:all_errors.append('JS '+str(e)))
-  page.set_content(page_html(mode,stored),wait_until='load')
+  page.set_content(page_html(mode,stored,offset_hours),wait_until='load')
   return ctx,page
  for mobile in (False,True):
   name='mobile touch' if mobile else 'desktop'
@@ -119,6 +126,68 @@ with sync_playwright() as p:
   page.wait_for_selector('.feed-status.live',timeout=5000)
   passed.append('slow loading state')
  except Exception as e:all_errors.append('slow: '+str(e)[:350]);traceback.print_exc(limit=2)
+ finally:ctx.close()
+ # Verify time-aware rotation across separate app openings; all sessions share the same storage.
+ try:
+  def mix(p):return p.locator('#view .discovery-card').evaluate_all('(cards)=>cards.map(x=>x.dataset.story)')
+  def saved_store(p):return json.loads(p.evaluate("window.__testStore['elsewhere-state-v6']"))
+  ctx,page=make(mobile=True,offset_hours=0)
+  first=mix(page);chk(len(first)==25,'initial General mix not 25')
+  original=saved_store(page)
+  ctx.close()
+  ctx,page=make(mobile=True,stored={'elsewhere-state-v6':json.dumps(original)},offset_hours=0.3)
+  unchanged=mix(page)
+  chk(first==unchanged,'reopening within one hour must preserve all 25 including order')
+  chk(page.evaluate('window.__latestFetchCount')>=1,'Latest not rechecked on app opening')
+  chk(page.evaluate('window.__generalFetchCount')>=1,'General discovery API not rechecked on app opening')
+  ctx.close()
+  # Save state before closing the context (persisted selection is authoritative).
+  ctx,page=make(mobile=True,stored={'elsewhere-state-v6':json.dumps(original)},offset_hours=2)
+  two=mix(page);chk(len(set(first)-set(two))==5,'after two hours must replace exactly five discoveries')
+  store=saved_store(page)
+  ctx.close()
+  ctx,page=make(mobile=True,stored={'elsewhere-state-v6':json.dumps(store)},offset_hours=10)
+  ten=mix(page);chk(len(set(two)-set(ten))==12,'after 8 more hours must replace twelve discoveries')
+  store=saved_store(page)
+  ctx.close()
+  ctx,page=make(mobile=True,stored={'elsewhere-state-v6':json.dumps(store)},offset_hours=35)
+  later=mix(page);chk(len(set(ten)-set(later))==25,'after a day must rotate all 25 with an ample pool')
+  tab_before=mix(page)
+  page.locator('a.bottom-tab[href="#latest"]').click()
+  page.locator('a.bottom-tab[href="#general"]').click()
+  page.wait_for_selector('.general-topline')
+  chk(tab_before==mix(page),'switching tabs changed General mix')
+  passed.append('reopen: keep 25, replace 5/12/25, stable tabs')
+ except Exception as e:all_errors.append('rotation: '+str(e)[:350]);traceback.print_exc(limit=2)
+ finally:ctx.close()
+ # Foreground resume re-evaluates selections and requests Latest again.
+ try:
+  ctx,page=make(mobile=True)
+  initial=mix(page);before=page.evaluate('window.__latestFetchCount')
+  page.evaluate('window.__fakeNow+=2*3600000; window.dispatchEvent(new Event("focus"))')
+  page.wait_for_function('(before)=>window.__latestFetchCount>before',arg=before,timeout=3500)
+  new_mix=mix(page)
+  chk(len(set(initial)-set(new_mix))==5,'foreground resume did not rotate five discoveries')
+  passed.append('foreground resume refresh')
+ except Exception as e:all_errors.append('resume: '+str(e)[:350]);traceback.print_exc(limit=2)
+ finally:ctx.close()
+ # Latest should stay identical when source data is unchanged, but a stronger
+ # new report should enter immediately even on a same-hour reopen.
+ try:
+  ctx,page=make(mobile=True)
+  page.locator('a.bottom-tab[href="#latest"]').click();page.wait_for_selector('.feed-status.live')
+  first=mix(page);chk(len(first)==25,'initial Latest is not 25')
+  firstCalls=page.evaluate('window.__latestFetchCount')
+  page.evaluate('window.__fakeNow+=10*60000; window.dispatchEvent(new Event("focus"))')
+  page.wait_for_function('(n)=>window.__latestFetchCount>n',arg=firstCalls)
+  chk(first==mix(page),'unchanged Latest publisher data unnecessarily changed cards')
+  page.evaluate("""const newer={...window.__apiPayload.stories[0],id:'latest-test-breaking',title:'Critical high-worth discovery',worth:5,publishedAt:new Date(Date.now()-1000).toISOString()}; window.__apiPayload.stories=[newer,...window.__apiPayload.stories]; window.__fakeNow+=60*1000; window.dispatchEvent(new Event('focus'));""")
+  page.wait_for_function("()=>Boolean(document.querySelector('[data-story=\"latest-test-breaking\"]'))",timeout=5000)
+  current=mix(page)
+  chk(current[0]=='latest-test-breaking','important new item should rank first')
+  chk(len(set(first)&set(current))==24,'one new Latest story should replace one old card')
+  passed.append('Latest unchanged-or-new selection')
+ except Exception as e:all_errors.append('latest-reselection: '+str(e)[:350]);traceback.print_exc(limit=2)
  finally:ctx.close()
  browser.close()
 print('PASS:',passed)
