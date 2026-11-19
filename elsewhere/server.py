@@ -168,7 +168,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         request=urllib.parse.urlsplit(self.path)
         if request.path=="/api/health":
-            return self.send_json({"ok":True,"version":"5.0","publisher_sources":len(FEEDS),"uptime_seconds":int(time.time()-START)})
+            return self.send_json({"ok":True,"version":"5.1","build_revision":os.environ.get("ELSEWHERE_BUILD_REV","local"),"publisher_sources":len(FEEDS),"uptime_seconds":int(time.time()-START)})
         if request.path in ("/api/content","/api/feed"):
             if urllib.parse.parse_qs(request.query).get("refresh")==["1"]:
                 refresh(True)
