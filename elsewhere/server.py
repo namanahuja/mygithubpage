@@ -124,6 +124,14 @@ def refresh(force=False):
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(lambda i:fetch_source(i,force),range(len(FEEDS))))
 
+    with LOCK:
+        checked = sum(1 for entry in DATA.values() if entry.get("checked"))
+        loaded = sum(1 for entry in DATA.values() if entry.get("stories"))
+        total = sum(len(entry.get("stories", [])) for entry in DATA.values())
+        errors = [(FEEDS[int(k)][1], entry.get("error")) for k, entry in DATA.items() if entry.get("error")]
+    print("[Elsewhere] source-refresh", "checked", checked, "active", loaded, "items", total,
+          "errors", errors[:5], flush=True)
+
 def snapshot():
     now=dt.datetime.now(dt.timezone.utc)
     with LOCK:
