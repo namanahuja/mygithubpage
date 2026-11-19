@@ -92,14 +92,14 @@ def parse_feed(raw, category, publisher):
         date=parse_date(child_text(node,"pubDate","published","updated","{http://www.w3.org/2005/Atom}published","{http://www.w3.org/2005/Atom}updated","{http://purl.org/dc/elements/1.1/}date"))
         if date is None or not (-dt.timedelta(hours=6) <= now-date <= dt.timedelta(days=7)):
             continue
-        description=clean(child_text(node,"description","summary","{http://www.w3.org/2005/Atom}summary","{http://purl.org/rss/1.0/modules/content/}encoded"),430)
-        if not title:
+        # Use the summary supplied by the publisher. Do not invent facts or
+        # publish a headline-only item disguised as a useful summary.
+        description=clean(child_text(node,"description","summary","{http://www.w3.org/2005/Atom}summary","{http://purl.org/rss/1.0/modules/content/}encoded"),640)
+        if not title or len(description.split()) < 18:
             continue
-        if not description:
-            description="A recent story from "+publisher+". Read the original publisher report for context."
         found.append({"id":"rss-"+hashlib.sha1(url.encode()).hexdigest()[:16],"title":title,"category":category,
                       "source":publisher,"url":url,"summary":description,"date":date.isoformat(),
-                      "kind":"current","type":"Publisher report","takeaway":"Open the original report for full context and any developing details."})
+                      "kind":"current","type":"Publisher report","summaryType":"Publisher-provided RSS summary","takeaway":"This card summarizes the details included in the publisher's feed. Check the original source for updates or fuller context."})
         if len(found)>=25:break
     return found
 
