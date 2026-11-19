@@ -1,0 +1,1 @@
+{"compilerOptions":{"target":"ES2022","module":"None","outDir":"build/client","strict":false,"lib":["ES2022","DOM","DOM.Iterable"],"skipLibCheck":true,"noEmitOnError":true},"include":["src/client/**/*.ts"]}

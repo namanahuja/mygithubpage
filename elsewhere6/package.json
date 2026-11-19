@@ -1,0 +1,22 @@
+{
+  "name": "elsewhere-discovery",
+  "version": "6.0.0",
+  "private": true,
+  "description": "Know what you don't know \u2014 a two-feed curiosity reader",
+  "scripts": {
+    "build": "tsc -p tsconfig.server.json && tsc -p tsconfig.client.json && node scripts/build.cjs",
+    "start": "node dist/src/server/server.js",
+    "dev": "npm run build && npm start",
+    "ingest": "node dist/src/server/cli.js",
+    "test": "npm run build && node --test dist/tests/*.test.js",
+    "test:browser": "python tests/browser.py",
+    "check": "tsc --noEmit -p tsconfig.server.json && tsc --noEmit -p tsconfig.client.json"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,23 @@
+# Production example. Starter is paid and intentionally NOT provisioned automatically.
+services:
+  - type: web
+    name: elsewhere-discovery-node
+    runtime: node
+    plan: starter
+    region: oregon
+    buildCommand: npm install --no-audit --no-fund && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SCHEDULER
+        value: "on"
+      - key: LINK_CHECK
+        value: "off"
+      - key: DATA_DIR
+        value: /var/data
+    disk:
+      name: elsewhere-feed-cache
+      mountPath: /var/data
+      sizeGB: 1
