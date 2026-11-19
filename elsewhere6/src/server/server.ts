@@ -21,7 +21,7 @@ export function handler(req:any,res:any){
  res.setHeader('Content-Security-Policy',"default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'self'");
  const u=new URL(req.url||'/',`http://localhost:${PORT}`),route=u.pathname;
  if(req.method!=='GET'&&req.method!=='HEAD'){send(res,405,{error:'Method not allowed'});return}
- if(route==='/api/health'){send(res,200,{ok:true,version:'6.0.0',scheduler:process.env.SCHEDULER!=='off',generalLibrary:library.length,latestCached:app.state.stories.length,lastUpdated:app.state.generatedAt||null});return}
+ if(route==='/api/health'){send(res,200,{ok:true,version:'6.1.0',scheduler:process.env.SCHEDULER!=='off',generalLibrary:library.length,latestCached:app.state.stories.length,lastUpdated:app.state.generatedAt||null});return}
  if(route==='/api/latest'){
   const current=app.latest();const states=app.status();
   // General-library refreshes do not count as a verified Latest refresh.
@@ -29,6 +29,10 @@ export function handler(req:any,res:any){
   const lastGood=lastGoodRuns.map(s=>s.lastRun!).sort().at(-1)||null;
   const stale=!lastGood||Date.now()-Date.parse(lastGood)>6*3600000||!current.length;
   send(res,200,{generatedAt:lastGood,stale,stories:current,sources:app.feeds.map(f=>({id:f.id,name:f.name,enabled:f.enabled,category:f.category,tier:f.tier,quality:f.quality,...(app.state.feedStatus[f.id]||{})})),window:{hours:168,preferredHours:48},tiers:states,provenance:'publisher excerpts; source date checked, not independent fact checking'});return;
+ }
+ if(route==='/api/general/discoveries'){
+  const lastRun=app.state.feedStatus.general?.lastRun||null;
+  send(res,200,{generatedAt:lastRun,stale:!lastRun||Date.now()-Date.parse(lastRun)>12*3600000,stories:app.state.generalDiscoveries,source:'Wikimedia featured excerpts; verified article URLs'});return;
  }
  if(route==='/api/general'){
   const visit=Math.min(1e8,Math.max(0,Number(u.searchParams.get('visit')||1)))||1;
