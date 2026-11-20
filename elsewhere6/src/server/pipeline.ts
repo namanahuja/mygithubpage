@@ -102,6 +102,8 @@ export class Pipeline {
  file:string;
  busy=new Set<string>();
  timer:any;
+ enrichmentScheduled=false;
+ enrichmentInProgress=false;
  fetcher:any;
  constructor(opts:{dataDir?:string;feeds?:FeedConfig[];env?:Record<string,string>;fetcher?:any}={}){
   this.dataDir=opts.dataDir||process.env.DATA_DIR||path.join(process.cwd(),'runtime-data');
@@ -178,12 +180,46 @@ export class Pipeline {
     await this.rebuildEvents(now);
    }
    this.state.generatedAt=new Date(now).toISOString();this.persist();
+   // Publish the initial feed immediately, then enrich leading summaries without
+   // delaying the first response on Render's sleeping/free instances.
+   if(this.timer&&tier!=='general'&&tier!=='links'&&this.state.stories.length&&!this.enrichmentScheduled){
+     this.enrichmentScheduled=true;
+     const pending=setTimeout(()=>void this.enrichSnapshot(),4500);(pending as any).unref?.();
+   }
    if(tier!=='general'&&tier!=='links'){
      const statuses=this.feeds.filter(f=>f.tier===tier).map(f=>this.state.feedStatus[f.id]).filter(Boolean);
      console.log('[Elsewhere] ingest',tier,'sources',statuses.length,'working',statuses.filter(s=>!s.error&&s.items).length,
        'totalLatest',this.latest(now).length,'errors',statuses.filter(s=>s.error).map(s=>s.name+': '+String(s.error).slice(0,90)).slice(0,8).join(' | '));
    }
   }finally{this.busy.delete(tier)}
+ }
+ async enrichSnapshot():Promise<void>{
+   if(this.enrichmentInProgress)return;
+   this.enrichmentInProgress=true;
+   try{
+     const now=Date.now();
+     const promoted=new Set(this.latest(now).slice(0,18).map(s=>s.source.url));
+     const candidates=Object.values(this.state.lastGood).flat().filter(s=>promoted.has(s.source.url)&&s.contentStatus==='excerpt-only').slice(0,12);
+     let count=0;
+     for(let i=0;i<candidates.length;i+=3){
+       const batch=await Promise.all(candidates.slice(i,i+3).map(async story=>{
+         const feed=this.feeds.find(f=>f.name===story.source.name);
+         if(!feed)return null;
+         try{const next=await enrichArticle(story,feed,this.fetcher);return next.contentStatus==='article-extracted'?next:null}catch{return null}
+       }));
+       for(const item of batch){if(!item)continue;
+         for(const articles of Object.values(this.state.lastGood)){
+           const idx=articles.findIndex(s=>s.source.url===item.source.url);
+           if(idx>=0){articles[idx]=item;count++;break}
+         }
+         this.state.articleCache ||= {};
+         this.state.articleCache[item.source.url]={at:now,story:item};
+       }
+     }
+     if(count){this.state.stories=Object.values(this.state.lastGood).flat().filter(s=>isRecent(s));await this.rebuildEvents();this.persist()}
+     console.log('[Elsewhere] background article enrichment',count,'of',candidates.length,'lead reports');
+   }catch(e){console.log('[Elsewhere] background article enrichment failed',String(e).slice(0,120))}
+   finally{this.enrichmentInProgress=false}
  }
  async rebuildEvents(now=Date.now()):Promise<void>{
    const groups=consolidateEvents(this.state.stories,now);
