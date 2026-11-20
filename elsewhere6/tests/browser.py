@@ -49,10 +49,11 @@ def chk(x,msg):
 all_errors=[];passed=[]
 with sync_playwright() as p:
  browser=p.chromium.launch(headless=True,executable_path='/usr/bin/chromium',args=['--no-sandbox'])
- def make(mobile=False,mode='ok',js=True,stored=None,offset_hours=0):
+ def make(mobile=False,mode='ok',js=True,stored=None,offset_hours=0,landing='general'):
   ctx=browser.new_context(viewport={'width':390 if mobile else 1280,'height':844 if mobile else 900},is_mobile=mobile,has_touch=mobile,java_script_enabled=js)
   page=ctx.new_page();page.set_default_timeout(4500);page.on('pageerror',lambda e:all_errors.append('JS '+str(e)))
   page.set_content(page_html(mode,stored,offset_hours),wait_until='load')
+  if landing=='general' and js:page.evaluate('location.hash="\#general"'.replace('\#','#'))
   return ctx,page
  for mobile in (False,True):
   name='mobile touch' if mobile else 'desktop'
@@ -202,6 +203,29 @@ with sync_playwright() as p:
   chk(len(set(first)&set(current))==24,'one new Latest story should replace one old card')
   passed.append('Latest unchanged-or-new selection')
  except Exception as e:all_errors.append('latest-reselection: '+str(e)[:350]);traceback.print_exc(limit=2)
+ finally:ctx.close()
+ # New launch starts on Latest, even before an API has returned stories.
+ try:
+  ctx,page=make(mobile=True,mode='slow',landing='latest')
+  chk(page.locator('.bottom-tab[href="#latest"].selected').count()==1,'Latest is not the default tab')
+  chk(page.locator('.fetching').count()==1,'Latest should show loading while news arrives')
+  page.evaluate('window.__finishFetch()')
+  page.wait_for_selector('.feed-status.live')
+  passed.append('Latest default at launch')
+ except Exception as e:all_errors.append('latest-default: '+str(e)[:350]);traceback.print_exc(limit=2)
+ finally:ctx.close()
+ # Regression: cached Latest cards must resolve in the reader when the backend fails.
+ try:
+  store={'elsewhere-state-v6':json.dumps({'latestCache':DATA,'latestFetchedAt':NOW})}
+  ctx,page=make(mobile=True,mode='failure',stored=store,landing='latest')
+  page.wait_for_selector('.feed-status.cached',timeout=5000)
+  chk(page.locator('#view .discovery-card').count()==25,'cached Latest cards missing')
+  page.locator('#view .discovery-card .headline a').first.tap()
+  page.wait_for_selector('.story-page',timeout=5000)
+  chk(page.locator('#view .story-title').count()==1,'cached story failed to resolve')
+  chk(page.locator('#view').inner_text().find('Story not found')<0,'cached story reported not found')
+  passed.append('cached Latest opens offline')
+ except Exception as e:all_errors.append('cached-latest: '+str(e)[:350]);traceback.print_exc(limit=2)
  finally:ctx.close()
  browser.close()
 print('PASS:',passed)
