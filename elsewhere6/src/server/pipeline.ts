@@ -28,7 +28,7 @@ export function parseRSS(xml:string,feed:FeedConfig,now=Date.now()):Story[]{
   const rawSummary=candidates.sort((a,b)=>b.length-a.length)[0]||'';
   let summary=rawSummary.replace(/^(read more|click here)\s*:?\s*/i,'').trim();
   // A headline is not a summary. Preserve source fidelity, even when it limits the available pool.
-  if(!title||summary.split(/\s+/).filter(Boolean).length<18||/subscribe to|sign up for our newsletter/i.test(summary.slice(0,90)))continue;
+  if(!title||summary.split(/\s+/).filter(Boolean).length<12||summary.length<75||/subscribe to|sign up for our newsletter/i.test(summary.slice(0,90)))continue;
   const words=summary.split(/\s+/);
   const sourceText=summary;
   const selected=extractiveBrief(title,sourceText,100);
@@ -131,14 +131,18 @@ export class Pipeline {
    // is never stored; only short evidence-based briefs are persisted.
    if(this.env.ARTICLE_EXTRACTION!=='off'){
     const limit=Math.max(0,Math.min(5,Number(this.env.ARTICLE_FETCH_LIMIT??3)||0));
-    for(let i=0;i<Math.min(limit,items.length);i++){
-      const original=items[i],cached=this.state.articleCache?.[original.source.url];
-      if(cached&&now-cached.at<12*3600000){items[i]=cached.story;continue}
+    // A cold free-tier server must publish headline/date/source records promptly;
+    // full-text extraction is attempted once a first copy has been published.
+    const limitNow=this.state.stories.length?limit:0;
+    const enrichments=await Promise.all(items.slice(0,limitNow).map(async(original)=>{
+      const cached=this.state.articleCache?.[original.source.url];
+      if(cached&&now-cached.at<12*3600000)return cached.story;
       const enriched=await enrichArticle(original,feed,this.fetcher);
-      items[i]=enriched;
       this.state.articleCache ||= {};
       if(enriched.contentStatus==='article-extracted')this.state.articleCache[original.source.url]={at:now,story:enriched};
-    }
+      return enriched;
+    }));
+    items=[...enrichments,...items.slice(limitNow)];
    }
    // Optional server-side AI: do not make paid model calls without credentials.
    if(this.env.LLM_API_KEY && this.env.SUMMARY_MODEL && this.env.SUMMARIZE_SINGLE==='on'){
@@ -174,6 +178,11 @@ export class Pipeline {
     await this.rebuildEvents(now);
    }
    this.state.generatedAt=new Date(now).toISOString();this.persist();
+   if(tier!=='general'&&tier!=='links'){
+     const statuses=this.feeds.filter(f=>f.tier===tier).map(f=>this.state.feedStatus[f.id]).filter(Boolean);
+     console.log('[Elsewhere] ingest',tier,'sources',statuses.length,'working',statuses.filter(s=>!s.error&&s.items).length,
+       'totalLatest',this.latest(now).length,'errors',statuses.filter(s=>s.error).map(s=>s.name+': '+String(s.error).slice(0,90)).slice(0,8).join(' | '));
+   }
   }finally{this.busy.delete(tier)}
  }
  async rebuildEvents(now=Date.now()):Promise<void>{
