@@ -53,7 +53,7 @@ with sync_playwright() as p:
   ctx=browser.new_context(viewport={'width':390 if mobile else 1280,'height':844 if mobile else 900},is_mobile=mobile,has_touch=mobile,java_script_enabled=js)
   page=ctx.new_page();page.set_default_timeout(4500);page.on('pageerror',lambda e:all_errors.append('JS '+str(e)))
   page.set_content(page_html(mode,stored,offset_hours),wait_until='load')
-  if landing=='general' and js:page.evaluate('location.hash="\#general"'.replace('\#','#'))
+  if landing=='general' and js:page.evaluate('location.hash="#general"')
   return ctx,page
  for mobile in (False,True):
   name='mobile touch' if mobile else 'desktop'
