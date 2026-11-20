@@ -12,10 +12,11 @@ try {
   try{memory=JSON.parse(localStorage.getItem(STORAGE)||'{}')||{}}catch{}
   const state:Store={read:memory.read||{},viewed:memory.viewed||{},saved:memory.saved||{},hidden:memory.hidden||{},known:memory.known||{},interesting:memory.interesting||{},visits:Number(memory.visits||0),lastGeneral:memory.lastGeneral||[],seen:memory.seen||{},latestCache:memory.latestCache||[],latestFetchedAt:memory.latestFetchedAt||'',theme:memory.theme||'dark',generalSelection:memory.generalSelection||[],generalMixAt:Number(memory.generalMixAt||0),lastOpenedAt:Number(memory.lastOpenedAt||0),generalRemote:memory.generalRemote||[]};
   let latest:AnyStory[]=[];let latestSelection:string[]=[];let generalMix:AnyStory[]=[];let mixChanged=0;let latestChanged=0;let status:'loading'|'live'|'cached'|'demo'|'offline'='loading';let errorText='';let allowOlder=false;
-  let dialogReturn='#general';let sectionScroll:Record<string,number>={latest:0,general:0};let searchQuery='';let savedSection='saved';
-  let front=window.location.hash||'#general';if(!/^#(?:latest|general|search|saved|you|story-[a-z0-9-]+)$/.test(front))front='#general';
-  if(front.startsWith('#story-'))front='#general';
-  const stories=new Map<string,AnyStory>([...general,...state.generalRemote,...demo,...Object.values(state.saved)].map(s=>[s.id,s]));
+  let dialogReturn='#latest';let sectionScroll:Record<string,number>={latest:0,general:0};let searchQuery='';let savedSection='saved';
+  // Latest is the launch destination. Explicit deep links remain intact.
+  const launchRoute=window.location.hash||'#latest';
+  if(!/^#(?:latest|general|search|saved|you|story-[a-z0-9-]+)$/.test(launchRoute))history.replaceState(null,'',location.pathname+location.search+'#latest');
+  const stories=new Map<string,AnyStory>([...general,...state.generalRemote,...demo,...state.latestCache,...Object.values(state.saved)].map(s=>[s.id,s]));
   const currentDate=()=>Date.now();const DAY=86400000;
   const esc=(s:any)=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
   const isSafe=(url:string)=>{try{return new URL(url).protocol==='https:'}catch{return false}};
@@ -167,7 +168,7 @@ try {
       </article>`;
   }
   function paragraphs(s:any){return String(s||'').split(/\n\n+/).filter(Boolean).map(p=>`<p>${esc(p)}</p>`).join('')}
-  function findStory(sid:string){return stories.get(sid)||state.saved[sid]}
+  function findStory(sid:string){return stories.get(sid)||state.saved[sid]||state.latestCache.find(s=>s.id===sid)||latest.find(s=>s.id===sid)}
   function showOverlay(name:string){const common=`<div class="overlay-heading"><button class="iconbutton" data-back="true" aria-label="Close">←</button><h1>${name==='search'?'Search':name==='saved'?'Your library':'You'}</h1></div>`;
     if(name==='search'){
       const found=[...stories.values()].filter((s:AnyStory)=>!state.hidden[s.id]&&!state.known[s.id]&&[s.title,s.category,s.summary].join(' ').toLowerCase().includes(searchQuery.toLowerCase())).slice(0,40);
@@ -181,11 +182,11 @@ try {
     return common+`<div class="settings-list"><h2>Elsewhere is for discovery, not profiling.</h2><p>No interest selection, tracking-based personalization or category quotas. Everybody gets the same editorial order; your read history only moves completed stories lower.</p><label class="setting"><span>Light theme</span><input type="checkbox" id="theme-toggle" ${state.theme==='light'?'checked':''}></label><div class="setting"><span>Stories read</span><strong>${Object.keys(state.read).length}</strong></div><div class="setting"><span>Stories saved</span><strong>${Object.keys(state.saved).length}</strong></div><div class="setting"><span>Visit count</span><strong>${state.visits}</strong></div><button class="pill danger" data-clear="true">Clear local history and bookmarks</button><p class="small">Read history and saves stay on this device. No cloud account sync in this edition.</p></div>`;
   }
   function toast(message:string,action?:{label:string;fn:()=>void}){const holder=id('toast')!;holder.innerHTML=`<span>${esc(message)}</span>${action?`<button id="toast-undo">${esc(action.label)}</button>`:''}`;holder.hidden=false;if(action)id('toast-undo')?.addEventListener('click',()=>{action.fn();holder.hidden=true});clearTimeout((toast as any).timer);(toast as any).timer=setTimeout(()=>holder.hidden=true,6000)}
-  let lastRoute='';let previousRoute='#general';
-  function render(){const target=id('view')!;const route=window.location.hash||'#general';
+  let lastRoute='';let previousRoute='#latest';
+  function render(){const target=id('view')!;const route=window.location.hash||'#latest';
     if(lastRoute!==route){if(lastRoute==='#latest'||lastRoute==='#general')sectionScroll[lastRoute.slice(1)]=window.scrollY;lastRoute=route;}
     const storyRoute=route.match(/^#story-([a-z0-9-]+)$/);const overlay=route.slice(1);
-    if(storyRoute){const s=findStory(storyRoute[1]);if(!s){target.innerHTML='<p>Story not found.</p><a href="#general">Back to General</a>';return}
+    if(storyRoute){const s=findStory(storyRoute[1]);if(!s){target.innerHTML="<div class='empty-block'><h2>Article unavailable</h2><p>This story is not on this device yet. Check Latest for the latest published reports.</p><a class='pill' href='#latest'>Back to Latest</a><button class='pill secondary' data-refresh='true'>Refresh stories</button></div>";id('bottom-nav')!.hidden=true;return}
       if(!state.read[s.id]){state.read[s.id]=Date.now();state.seen[s.id]=Date.now();persist()}state.viewed[s.id]=Date.now();persist();
       target.innerHTML=detailView(s);id('bottom-nav')!.hidden=true;window.scrollTo(0,0);
     }else if(['search','saved','you'].includes(overlay)){
@@ -197,11 +198,11 @@ try {
     }
     queryAll('.top-action').forEach(a=>a.classList.toggle('active',a.getAttribute('href')===route));
   }
-  function nextStory(){const route=location.hash||'#general';const s=findStory(route.replace('#story-',''));
+  function nextStory(){const route=location.hash||'#latest';const s=findStory(route.replace('#story-',''));
     const arr=s?.kind==='latest'?rankLatest((latest.length?latest:state.latestCache).filter(s=>!latestSelection.length||latestSelection.includes(s.id))):generalMix;
-    const i=arr.findIndex((v:AnyStory)=>v.id===s?.id);const next=arr[(i+1)%arr.length];if(next)hash('#story-'+next.id);else hash('#general');
+    const i=arr.findIndex((v:AnyStory)=>v.id===s?.id);const next=arr[(i+1)%arr.length];if(next)hash('#story-'+next.id);else hash('#latest');
   }
-  const goBack=()=>{if(window.history.length>1)window.history.back();else hash(previousRoute.startsWith('#story-')?'#general':previousRoute)};
+  const goBack=()=>{if(window.history.length>1)window.history.back();else hash(previousRoute.startsWith('#story-')?'#latest':previousRoute)};
   window.addEventListener('hashchange',()=>{const route=location.hash;if((lastRoute==='#latest'||lastRoute==='#general')&&route.startsWith('#story-'))previousRoute=lastRoute;render();});
   document.addEventListener('click',e=>{const el=e.target as Element;if(!el.closest)return;
     const save=el.closest('[data-save]') as HTMLElement|null;if(save){e.preventDefault();e.stopPropagation();const key=save.dataset.save!,s=findStory(key);if(state.saved[key])delete state.saved[key];else if(s)state.saved[key]=JSON.parse(JSON.stringify(s));persist();render();return}
@@ -221,7 +222,8 @@ try {
   document.addEventListener('input',e=>{const t=e.target as HTMLInputElement;if(t.id==='search-input'){const start=t.selectionStart;searchQuery=t.value;render();const field=id('search-input') as HTMLInputElement;field?.focus();field?.setSelectionRange(start,start)}if(t.id==='theme-toggle'){state.theme=t.checked?'light':'dark';document.body.dataset.theme=state.theme;persist()}});
   window.addEventListener('storage',e=>{if(e.key===STORAGE){try{const newState=JSON.parse(e.newValue||'{}');Object.assign(state,newState);document.body.dataset.theme=state.theme;replenishGeneral();render()}catch{}}});
   function validPayload(payload:any){return payload&&Array.isArray(payload.stories)}
-  let fetchingLatest=false;let retryLatest:ReturnType<typeof setTimeout>|null=null;
+  let fetchingLatest=false;let retryLatest:ReturnType<typeof setTimeout>|null=null;let pendingPolls=0;
+  function pollLatest(delay=7000){if(!retryLatest&&location.protocol!=='file:')retryLatest=setTimeout(()=>{retryLatest=null;void fetchLatest()},delay)}
   async function fetchLatest(force=false){
     if(fetchingLatest)return;fetchingLatest=true;
     if(!force&&status==='loading'){render()}const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),13000);
@@ -229,15 +231,17 @@ try {
       const resp=await fetch('/api/latest',{cache:'no-store',signal:ctrl.signal});if(!resp.ok)throw Error('HTTP '+resp.status);
       const payload=await resp.json();if(!validPayload(payload))throw Error('Invalid API response');
       const items=payload.stories.filter(fresh);if(items.length){
+        pendingPolls=0;
         const previous=new Set(rankLatest(state.latestCache).map((s:any)=>s.id));
         latestChanged=previous.size?rankLatest(items).filter((s:any)=>!previous.has(s.id)).length:0;
         latest=items;latestSelection=rankLatest(items).map((s:any)=>s.id);for(const s of items)stories.set(s.id,s);state.latestCache=items;state.latestFetchedAt=payload.generatedAt||new Date().toISOString();persist();status=payload.stale?'cached':'live';errorText=payload.stale?'The source snapshot is older than six hours.':''}
-      else if(state.latestCache.some(fresh)){if(!latestSelection.length)latestSelection=rankLatest(state.latestCache).map((s:any)=>s.id);status='cached';errorText='No new publisher articles; showing your last successful fetch.'}
-      else{status='offline';errorText='No qualifying recent source reports.';
-        // A sleeping free-tier server can reply before its scheduler finishes the first ingestion.
-        if(!retryLatest&&location.protocol!=='file:')retryLatest=setTimeout(()=>{retryLatest=null;void fetchLatest()},12000);
+      else if(state.latestCache.some(fresh)){for(const s of state.latestCache)stories.set(s.id,s);if(!latestSelection.length)latestSelection=rankLatest(state.latestCache).map((s:any)=>s.id);status='cached';errorText=payload.pending?'Refreshing publisher feeds; showing your saved copy.':'No new publisher articles; showing your last successful fetch.';if(payload.pending)pollLatest()}
+      else if(payload.pending&&pendingPolls++<8){
+        status='loading';errorText='Publisher feeds are loading after server startup.';pollLatest();
+      }else{status='offline';errorText='No qualifying recent publisher reports were returned. Check source status or try again.';
+        if(pendingPolls++<8)pollLatest(18000);
       }
-    }catch(e){status=state.latestCache.some(fresh)?'cached':'offline';errorText='Content API unavailable: '+String((e as Error).message||e).slice(0,100);for(const s of state.latestCache)stories.set(s.id,s)}
+    }catch(e){status=state.latestCache.some(fresh)?'cached':'offline';errorText='Content API unavailable: '+String((e as Error).message||e).slice(0,100);for(const s of state.latestCache)stories.set(s.id,s);if(status==='cached'&&pendingPolls++<8)pollLatest(12000)}
     finally{clearTimeout(timer);fetchingLatest=false;render()}
   }
   let fetchingGeneral=false;
