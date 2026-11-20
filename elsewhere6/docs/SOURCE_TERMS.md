@@ -24,3 +24,7 @@ RSS/Atom availability does not automatically grant a right to publish full artic
 | Wikimedia | Featured article and on-this-day | Follow Wikimedia API user-agent guidelines and individual article CC BY-SA / attribution requirements. |
 
 **Important:** No live terms audit or contract/license acceptance was performed for all sources. Enabled RSS fetching should be reviewed against applicable terms before commercial/public operation.
+
+## V7 article-body access
+
+The V7 pipeline optionally retrieves public publisher article HTML **only after checking robots.txt**, avoiding redirect-following, paywall-bypass methods, excessive response sizes, and persistent storage of the full article body. The extracted body is used to select a short in-app brief; only the short brief is saved. This does **not** establish any grant of copyright or API rights. Before enabling commercial use, review and obtain all applicable publisher rights, including rights for derived summaries and use of content with third-party AI services. When a publisher blocks extraction, fall back to its provided feed excerpt with the provenance label; do not claim the full article was read.

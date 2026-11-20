@@ -1,6 +1,6 @@
 {
   "name": "elsewhere-discovery",
-  "version": "6.1.0",
+  "version": "7.0.0",
   "private": true,
   "description": "Know what you don't know — a two-feed curiosity reader",
   "scripts": {

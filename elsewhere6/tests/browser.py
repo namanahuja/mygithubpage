@@ -12,6 +12,14 @@ DATA=[dict(id='latest-test-'+str(i),kind='latest',category='Science',title=f'Dis
  source=dict(name='Test publisher '+str(i),url='https://test.example.com/articles/report-'+str(i),quality=.9),publishedAt=NOW,
  background='Article summary from publisher feed.',whyItMatters='The development has implications worth knowing.',whyRead='Source-backed current story.',
  relatedFacts=[],relatedIds=[],alsoReportedBy=[],uncertainty='One publisher; not independently verified.',provenance='publisher excerpt',readingMinutes=1,worth=4) for i in range(26)]
+# One realistic consolidated event for in-app reader and source-list UI checks.
+DATA[0]['sourceNotes']=[
+ {'name':'Test publisher 0','url':DATA[0]['source']['url'],'summary':DATA[0]['summary']},
+ {'name':'Independent desk','url':'https://independent-news.test/articles/event-0','summary':'A second named outlet independently covers the same development and adds source-attributed details.'}
+]
+DATA[0]['alsoReportedBy']=[dict(name='Independent desk',url='https://independent-news.test/articles/event-0',quality=.8)]
+DATA[0]['eventMembers']=['latest-test-0','independent-coverage-0']
+DATA[0]['provenance']='article-derived extract'
 
 def page_html(mode='ok',stored=None,offset_hours=0):
  data=json.dumps(dict(generatedAt=NOW,stale=False,stories=DATA,sources=[],tiers=[]))
@@ -76,7 +84,7 @@ with sync_playwright() as p:
    chk(not page.url.split('#')[-1].startswith('story-'),'save button navigated')
    store=page.evaluate('window.__testStore')
    chk('elsewhere-state-v6' in store,'save did not persist')
-   chk(page.locator('a.source-link').first.get_attribute('target')=='_blank','source must target new tab')
+   chk(page.locator('#view .discovery-card a.source-link').count()==0,'source links must not interrupt cards')
    # Reopening with same localStorage snapshot restores bookmarks
    ctx.close();ctx,page=make(mobile,stored=store)
    page.locator('a.top-action[aria-label="Saved and reading history"]').click()
@@ -91,6 +99,12 @@ with sync_playwright() as p:
    chk(page.locator('#view .discovery-card').count()==25,'not 25 Latest cards')
    page.locator('#view .headline a').first.tap() if mobile else page.locator('#view .headline a').first.click()
    page.wait_for_selector('.story-page')
+   chk(page.locator('#view .source-cta').count()==1, 'missing original reporting')
+   chk(page.locator('#view .source-cta').get_attribute('target')=='_blank','article source must open a new tab')
+   chk(page.locator('#view .source-cta').get_attribute('href').startswith('https://'),'article source url')
+   chk(page.locator('#view .reporting-note').count()==1,'missing attributed other-outlet reporting')
+   chk(page.locator('#view .editorial-section h2').all_inner_texts()[-1]=='Original reporting','source links must come last')
+   if mobile:page.screenshot(path=str(HERE/'docs'/'v7-reader.png'),full_page=True)
    page.locator('button.back-action').click()
    page.wait_for_selector('#view .discovery-card')
    chk(page.locator('#view .discovery-card.was-read').count()==1,'read item not dimmed')

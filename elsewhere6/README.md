@@ -85,3 +85,32 @@ Every new page load, home-screen PWA open, foreground resume, and network reconn
 **General rotation is time-sensitive, not arbitrary:** keep all for <1 h, replace 5 for 1–6 h, replace 12 for 6–24 h, or replace up to 25 after 24 h. This period measures time since the *last General mix change*. The persisted selection is reused for same-hour reopenings; the backend's optional Wikimedia feed can expand the candidate pool. Read / Known / Hidden / Saved signals are stored locally and only affect reading priority, removal, and preservation—not category interests or preference-driven ranking. The Manual **New mix** button is immediate.
 
 **Latest uses verified publication dates**, not a fixed daily reset: it requests the API on each open and only changes cards if a report enters or leaves the top 25 under current ranking, goes past the seven-day age limit, or is read/removed. Refresh interval controls upstream source checks, not the guarantee of new articles. The device cache is clearly labeled if publisher access fails. The free Render process and scheduler sleep after inactivity; this on-open request is not a substitute for an always-on background scheduler.
+
+## V7 — read the story here; source links at the end (November 20, 2026)
+
+The **Latest** reader now keeps users inside Elsewhere. Cards have substantial source-grounded text and a native link to an in-app story; the original publisher link is at the bottom of the story page, together with links from other reporting outlets. In-app article pages show the summary, background, why it matters, and publisher-attributed details from other outlets. Each feed story is labelled by its actual provenance (`article-derived extract`, `publisher excerpt`, or optional `AI synthesis of publisher text`).
+
+### Content pipeline and limitations
+
+1. Read the publisher RSS/Atom feed and extract its structured article-specific URL, source date and description or `content:encoded` body.
+2. For **up to three articles per feed per refresh**, check the publisher's `robots.txt` (conservative: unavailable/disallowed means no extraction), then, where allowed, fetch the article page without following redirects, reject obvious subscriber-only content, prefer `NewsArticle.articleBody` JSON-LD, and otherwise select the page's article paragraphs. HTML content is limited and never persisted in full.
+3. Extract a short, relevance-ranked **fact-based selection** (with an article-body excerpt provenance label). The deterministic fallback selects source sentences instead of claiming to have paraphrased the entire article. It discards unrelated leads when possible; it does not perform independent fact checking. If full article text is unavailable, the card honestly uses the publisher feed excerpt.
+4. Cluster matching report coverage across distinct publishers using title similarity, shared named entities, compatible event-action signatures and a two-day reporting window. Distinct later events remain separate when the heuristic recognizes the difference. **This clustering is heuristic and can produce false positives or false negatives.** Each cluster presents one story with original source links and separately attributed details. Stable IDs are preserved as publisher coverage joins via the persisted `eventIds` table.
+5. Optional **server-side** model-assisted synthesis can use already-selected publisher passages and notes from multiple sources. No paid model use is enabled by default, and no model key is shipped. The source material may contain errors; an AI summary is explicitly labelled, not represented as independently verified reporting. Models can still make mistakes; review is needed for high-stakes factual claims.
+
+**No paywall circumvention:** The extractor uses ordinary public pages only, honors robots access rules, limits requests and never republishes an entire article. Robots permissions are **not** a commercial-content license. Check each publisher's terms and obtain any needed permission before relying on article-body-derived work in a commercial product. Feed items may be unavailable due to paywalls, robots restrictions, HTTP failures or text extraction misses.
+
+### V7 configuration
+
+| Variable | Default | Notes |
+|---|---|---|
+| `ARTICLE_EXTRACTION` | enabled | Set `off` to use only RSS/source excerpts. |
+| `ARTICLE_FETCH_LIMIT` | `3` | Articles attempted per feed per refresh, capped at 5. Does not force re-fetch of successfully cached articles for 12 hours. |
+| `LLM_API_KEY` | unset | Optional, **server side only**. No model calls without this and `SUMMARY_MODEL`. |
+| `SUMMARY_MODEL` | unset | Model supported by the configured provider endpoint. |
+| `SUMMARIZE_EVENTS` | `off` | Set `on` to run bounded multi-source AI synthesis (at most four grouped events per ingestion tier). This may cost money. |
+| `SUMMARIZE_SINGLE` | `off` | Set `on` for bounded AI editing of up to three stories per feed per refresh. This may cost money. |
+
+**Free Render limitation:** Render Free instances sleep when idle, which suspends the in-process refresh worker and may reset temporary `runtime-data/` state. When restarted, the server can re-ingest publisher content. For reliable ongoing enrichment and persistent event identities, deploy an always-on service with a persistent volume, or provide a separate storage/scheduler configuration; do not infer that the free tier does this.
+
+**Live-content audit:** The local tests use deterministic mock feeds and pages. External article-body fetch success, publisher content terms, deployed feed quality, exact cluster accuracy for real breaking news, and physical iPhone Safari remain unverified until checked separately. Always inspect `/api/latest`'s `sources`, `stale`, and story provenance in production.

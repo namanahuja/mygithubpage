@@ -1,3 +1,4 @@
+import {consolidateEvents} from './events';
 import {Story, UserState} from './types';
 export const MAX_LATEST_AGE_MS = 7*86400000;
 const HOUR=3600000;
@@ -26,14 +27,10 @@ export function latestScore(s:Story,now=Date.now(),read?:Record<string,number>,v
  return .55*worth+.25*fresh+.10*corroboration+.05*sourceQuality(s)+.05*novelty;
 }
 export function mergeCoverage(input:Story[],now=Date.now()):Story[]{
- const sorted=input.filter(s=>isRecent(s,now)).sort((a,b)=>latestScore(b,now)-latestScore(a,now));
- const groups:Story[]=[];
- for(const story of sorted){
-  const existing=groups.find(other=>Math.abs(Date.parse(other.publishedAt||'')-Date.parse(story.publishedAt||''))<=2*86400000&&similarity(other.title,story.title)>=.5);
-  if(existing){if(existing.source.name!==story.source.name&&!existing.alsoReportedBy.some(a=>a.name===story.source.name)) existing.alsoReportedBy.push({...story.source});existing.corroboration=Math.min(2,existing.alsoReportedBy.length);}
-  else groups.push({...story,alsoReportedBy:[...(story.alsoReportedBy||[])],corroboration:story.corroboration||0});
- }
- return groups;
+ // Imported on demand to avoid imposing the server's extraction dependency
+ // on the browser bundle. Both this module and events.ts are pure functions.
+ if(input.length&&input.every(s=>Array.isArray(s.eventMembers)&&s.eventMembers.length))return input.filter(s=>isRecent(s,now));
+ return consolidateEvents(input,now);
 }
 export function rankLatest(stories:Story[],state?:Partial<UserState>,now=Date.now()):Story[]{
  const grouped=mergeCoverage(stories,now),read=state?.read||{},viewed=state?.viewed||{};

@@ -113,7 +113,8 @@ try {
     return `<div class="art art-${esc(s.category.toLowerCase().replace(/[^a-z]+/g,'-'))}" role="img" aria-label="Decorative artwork representing ${esc(s.category)}"><span class="art-orb"></span><span class="art-line"></span><span class="art-glyph">${char}</span><span class="art-corner">ELSEWHERE / ${esc(s.category).toUpperCase()}</span></div>`;}
   function storyCard(s:AnyStory,index:number){
     const isLatest=s.kind==='latest';const stamp=isLatest?date(s.publishedAt):'Timeless knowledge';const read=Boolean(state.read[s.id]);const saved=Boolean(state.saved[s.id]);
-    const shortLabel=isLatest?`${esc(s.source.name)} · ${esc(stamp)}`:esc(s.source.name);
+    const sourceCount=isLatest?new Set([s.source?.name,...(s.alsoReportedBy||[]).map((x:AnyStory)=>x.name)]).size:1;
+    const shortLabel=isLatest?`${esc(sourceCount>1?sourceCount+' reporting sources':s.source.name)} · ${esc(stamp)}`:esc(s.source.name);
     return `<article class="discovery-card ${read?'was-read':''}" data-story="${esc(s.id)}">
       ${artwork(s)}
       <div class="card-inside"><div class="eyebrow"><span>${esc(s.category)}</span><span>${isLatest?esc(age(s.publishedAt)):'GENERAL'}</span></div>
@@ -121,7 +122,7 @@ try {
       <p class="card-description">${esc(s.summary)}</p>
       <div class="why-read"><span class="pin">✳</span><span>${esc(s.whyRead)}</span></div>
       <div class="card-footer"><div><span class="source-name">${shortLabel}</span><span class="card-time">${esc(String(s.readingMinutes||size(s.summary)))} min read · ${esc(s.provenance)}</span></div>
-      <div class="card-actions"><a class="source-link" href="${isSafe(s.source.url)?esc(s.source.url):'#'}" target="_blank" rel="noopener noreferrer" aria-label="Open ${esc(s.source.name)} source">Source ↗</a><button class="save-button ${saved?'active':''}" data-save="${esc(s.id)}" aria-pressed="${saved}" aria-label="${saved?'Unsave':'Save'} ${esc(s.title)}">${saved?'♥':'♡'}</button></div></div>
+      <div class="card-actions"><button class="save-button ${saved?'active':''}" data-save="${esc(s.id)}" aria-pressed="${saved}" aria-label="${saved?'Unsave':'Save'} ${esc(s.title)}">${saved?'♥':'♡'}</button></div></div>
       <div class="cue">${read?'Read again':'Read more'} <span>↗</span></div>
       </div></article>`;
   }
@@ -150,16 +151,18 @@ try {
     return `<article class="story-page"><div class="story-toolrow"><button class="iconbutton back-action" data-back="true" aria-label="Back">←</button><div class="rightbuttons"><button class="iconbutton" data-share="${esc(s.id)}" aria-label="Share story">↗</button><button class="iconbutton ${saved?'active':''}" data-save="${esc(s.id)}" aria-pressed="${saved}" aria-label="${saved?'Unsave':'Save'} story">${saved?'♥':'♡'}</button></div></div>
       <div class="story-top"><span class="category-pill">${esc(s.category)}</span><span class="story-worth">Worth ${esc(s.worth)} / 5</span></div>
       <h1 class="story-title">${esc(s.title)}</h1><p class="story-lede">${esc(s.summary)}</p>
-      <div class="story-byline">${esc(s.source.name)} ${s.publishedAt?'· '+date(s.publishedAt):''} · ${esc(s.provenance)}</div>
+      <div class="story-byline">${s.kind==='latest'&&s.sourceNotes?.length>1?`${esc(s.sourceNotes.length)} publisher reports · `:''}${esc(s.source.name)} ${s.publishedAt?'· '+date(s.publishedAt):''} · ${esc(s.provenance)}</div>
       ${artwork(s)}
       <section class="editorial-section"><h2>Background & context</h2>${paragraphs(s.background)}</section>
       <section class="editorial-section"><h2>Why it matters</h2>${paragraphs(s.whyItMatters)}</section>
+      ${s.kind==='latest'&&s.sourceNotes?.length>1?`<section class="editorial-section"><h2>What else was reported</h2><p>These accounts were grouped as the same event. Additional claims remain attributed to their publishers rather than being presented as independently verified.</p>${s.sourceNotes.slice(1).map((note:AnyStory)=>`<div class="reporting-note"><strong>${esc(note.name)}</strong><p>${esc(note.summary)}</p></div>`).join('')}</section>`:''}
+      ${s.kind==='latest'&&state.read[s.id]&&s.updatedAt&&d(s.updatedAt)>state.read[s.id]?`<div class="update-indicator" role="status">Updated since you read this story</div>`:''}
       ${facts.length?`<section class="editorial-section"><h2>Related facts</h2><ul>${facts.map((f:string)=>`<li>${esc(f)}</li>`).join('')}</ul></section>`:''}
       ${s.kind==='latest'&&!facts.length?`<p class="supported-limit">That's everything the cited reporting supports so far.</p>`:''}
-      <section class="editorial-section"><h2>Confidence & provenance</h2><p>${esc(s.uncertainty||'Read the original reporting for context.')}</p><p class="provenance">Source type: ${esc(s.provenance)}. ${s.kind==='latest'?'Publisher-excerpt summaries are not independently verified.':'Reference-based explanation; check original references.'}</p></section>
-      <section class="editorial-section"><h2>Original reporting</h2><a class="source-cta" href="${esc(s.source.url)}" target="_blank" rel="noopener noreferrer">Read at ${esc(s.source.name)} <span>↗</span></a>${(s.alsoReportedBy||[]).length?`<p>Also reported by</p>${s.alsoReportedBy.map((x:any)=>`<p><a target="_blank" rel="noopener noreferrer" href="${esc(x.url)}">${esc(x.name)} ↗</a></p>`).join('')}`:''}</section>
+      <section class="editorial-section"><h2>Confidence & provenance</h2><p>${esc(s.uncertainty||'Read the original reporting for context.')}</p><p class="provenance">Source type: ${esc(s.provenance)}. ${s.kind==='latest'?'In-app explanation uses available publisher text, not independent fact verification. Extractive briefs are selected passages; AI synthesis is labelled when enabled.':'Reference-based explanation; check original references.'}</p></section>
       <section class="editorial-section feedback"><h2>How was this?</h2><div class="feedback-row"><button class="pill ${state.interesting[s.id]?'selected':''}" data-feedback="interesting" data-fid="${esc(s.id)}">✳ Interesting</button><button class="pill" data-feedback="known" data-fid="${esc(s.id)}">✓ Knew this</button><button class="pill" data-feedback="hidden" data-fid="${esc(s.id)}">− Not interested</button></div><p class="small">Feedback records your reaction; Interesting does not change recommendations.</p></section>
       ${related.length?`<section class="editorial-section"><h2>Related discoveries</h2><div class="related-list">${related.map((r:AnyStory)=>`<a href="#story-${esc(r.id)}">${esc(r.title)} <span>↗</span></a>`).join('')}</div></section>`:''}
+      <section class="editorial-section"><h2>Original reporting</h2><a class="source-cta" href="${esc(s.source.url)}" target="_blank" rel="noopener noreferrer">Read at ${esc(s.source.name)} <span>↗</span></a>${(s.alsoReportedBy||[]).length?`<p>Also reported by</p>${s.alsoReportedBy.map((x:any)=>`<p><a target="_blank" rel="noopener noreferrer" href="${esc(x.url)}">${esc(x.name)} ↗</a></p>`).join('')}`:''}</section>
       <div class="story-bottom"><button class="pill" data-back="true">← Back</button><button class="pill primary" data-next="true">Next discovery →</button></div>
       </article>`;
   }
